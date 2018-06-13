@@ -118,48 +118,42 @@ ResultInfo parser131500ComAu::getJourneyData(QString destinationStation, QString
         modeString = "arr";
     }
 
-    QString hourStr = "am";
-    int hour = time.toString("hh").toInt();
-    if (hour > 12) {
-        hour = hour - 12;
-        hourStr = "pm";
-    }
-
     //Request one. (Station selection and receiving an up to date cookie.)
-    QString fullUrl = "http://www.131500.com.au/plan-your-trip/trip-planner?session=invalidate&itd_cmd=invalid&itd_includedMeans=checkbox&itd_inclMOT_7=1&itd_anyObjFilter_origin=2&itd_anyObjFilter_destination=2&x=37&y=12";
-    fullUrl.append("&itd_itdDate=" + date.toString("yyyyMMdd"));
-    fullUrl.append("&itd_itdTimeHour=" + QString::number(hour));
-    fullUrl.append("&itd_itdTimeMinute=" + time.toString("mm"));
-    fullUrl.append("&itd_itdTripDateTimeDepArr=" + modeString);
-    fullUrl.append("&itd_itdTimeAMPM=" + hourStr);
-    fullUrl.append("&itd_name_origin=" + destinationStation);
-    fullUrl.append("&itd_name_destination=" + arrivalStation);
+    QString fullUrl = "https://api.transport.nsw.gov.au/v1/tp/trip?outputFormat=rapidJSON&coordOutputFormat=EPSG%3A4326&type_origin=any&type_destination=any&calcNumberOfTrips=6&TfNSWTR=true&version=10.2.1.42";//
+    fullUrl.append("&itdDate=" + date.toString("yyyyMMdd"));
+    fullUrl.append("&itdTime=" + time.toString("hhmm"));
+    fullUrl.append("&depArrMacro=" + modeString);
+    fullUrl.append("&name_origin=" + destinationStation);//10101331
+    fullUrl.append("&name_destination=" + arrivalStation);//10102027
+    fullUrl.append("&excludedMeans=checkbox");
 
     // itd_inclMOT_5 = bus
     // itd_inclMOT_1 = train
+    // exclMOT_4 = light rail
+    // exclMOT_7 = coach
     // itd_inclMOT_9 = ferry
     // itd_inclMOT_11 = school bus
-    if (trainrestrictions == 0) {
-       fullUrl.append("&itd_inclMOT_5=1&itd_inclMOT_1=1&itd_inclMOT_9=1");
+    if (trainrestrictions == 0) {//everything except school buses
+       fullUrl.append("&exclMOT_11=1");
     }
-    if (trainrestrictions == 1) {
-       fullUrl.append("&itd_inclMOT_5=1");
+    if (trainrestrictions == 1) {//only buses (and coaches)
+       fullUrl.append("&exclMOT_1=1&exclMOT_4=1&exclMOT_9=1&exclMOT_11=1");
     }
-    if (trainrestrictions == 2) {
-       fullUrl.append("&itd_inclMOT_1=1");
+    if (trainrestrictions == 2) {//only trains (and light rail)
+       fullUrl.append("&exclMOT_5=1&exclMOT_7=1&exclMOT_9=1&exclMOT_11=1");
     }
-    if (trainrestrictions == 3) {
-       fullUrl.append("&itd_inclMOT_9=1");
+    if (trainrestrictions == 3) {//only ferries
+       fullUrl.append("&exclMOT_1=1&exclMOT_4=1&exclMOT_5=1&exclMOT_7=1&exclMOT_11=1");
     }
-    if (trainrestrictions == 4) {
-       fullUrl.append("&itd_inclMOT_11=1");
+    if (trainrestrictions == 4) {//only school buses
+       fullUrl.append("&exclMOT_1=1&exclMOT_4=1&exclMOT_5=1&exclMOT_7=1&exclMOT_9=1");
     }
 
-    //qDebug()<<fullUrl;
+    qDebug() << fullUrl;
 
     QUrl url(fullUrl);
 
-    http->setHost(url.host(), QHttp::ConnectionModeHttp, url.port() == -1 ? 0 : url.port());
+    http->setHost(url.host(), QHttp::ConnectionModeHttps, url.port() == -1 ? 0 : url.port());//sslErrors???
 
     filebuffer = new QBuffer();
 
@@ -167,31 +161,65 @@ ResultInfo parser131500ComAu::getJourneyData(QString destinationStation, QString
     {
         qDebug() << "Can't open Buffer";
     }
-
-    currentRequestId = http->get(url.path() + "?" + url.encodedQuery(), filebuffer);
-
+    QHttpRequestHeader header;
+    header.setRequest("GET", url.path());
+    header.setValue("Host", url.host());
+    header.setValue("Accept", "application/json");
+    header.setValue("Authorization", "apikey NT3I18YtJOmS2xWEtAagMszSiXysEQeC84fY");//Wikiwide's API key
+    currentRequestId = http->request(header, "", filebuffer);
     loop.exec();
+    filebuffer->close();
+    QJson::Parser parser;
 
-    QRegExp regexp = QRegExp("<div class=\"midcolumn3\">(.*)</div>(.*)</div>(.*)<div id=\"righttools\">");
-    regexp.setMinimal(true);
-
-    regexp.indexIn(filebuffer->buffer());
-
-    QString element = "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><html xmlns=\"http://www.w3.org/1999/xhtml\">\n<body>\n" + regexp.cap(0) + "\n</div></body>\n</html>\n";
-
-    QRegExp imgReg = QRegExp("icon_(.*)_s.gif\" />");
-    imgReg.setMinimal(true);
-    element.replace(imgReg, "icon_" + QString("\\1") + "_s.gif\" />" + QString("\\1"));
-
-    //qDebug()<<element;
-
-    QBuffer readBuffer;
-    readBuffer.setData(element.toAscii());
-    readBuffer.open(QIODevice::ReadOnly);
-
-    QXmlQuery query;
-    query.bindVariable("path", &readBuffer);
-    query.setQuery("declare default element namespace \"http://www.w3.org/1999/xhtml\"; declare variable $path external; doc($path)/html/body/div/div/table/tbody/tr/td[@id='header2']/string()");
+    bool ok;
+    ResultInfo result;
+    QVariantMap map = parser.parse(filebuffer->buffer(),&ok).toMap();
+//    QVariantMap options = map["traveloptions"].toMap();//???
+//    QVariantMap enquiry = options["OriginalEnquiry"].toMap();//???
+//    result.fromStation = enquiry["Start"].toString();//???
+//    result.toStation = enquiry["End"].toString();//???
+//    QString sdate = options["searchDate"].toString();//???
+//    result.timeInfo = sdate.section(' ',0,0);//???
+    QVariantList journeys = map["journeys"].toList();
+    foreach (QVariant j, journeys)
+     {
+      QVariantMap journey = j.toMap();
+      ResultItem item;
+      QStringList trains;
+      QVariantList legs = journey["legs"].toList();
+      int changes = 0;
+      foreach (QVariant l, legs)
+       {
+        QVariantMap leg = l.toMap();
+        QVariantMap trans = leg["transportation"].toMap();
+        QVariantMap pro = trans["product"].toMap();
+        QVariantMap tor = pro["class"].toInt();
+        if (tor != 100 && tor != 99)
+         {
+          trains.append(trans["description"].toString());//use tor and QMap!!!
+          changes++;
+         }
+        }
+        trains.removeDuplicates();
+        item.trainType = trains.join(", ");
+        int c = changes - 1;
+        if (c < 0)
+         {
+          c = 0;
+         }
+        item.changes = QString::number(c);
+        item.duration = journey["duration"].toString();
+        QJson::Serializer serializer;
+        bool ok;
+        QByteArray jsonleg = serializer.serialize(journey, &ok);
+item.detailsUrl = jsonleg;
+result.items.append(item);
+}
+//QFile file("/home/user/post.txt");
+//file.open(QIODevice::WriteOnly);
+//file.write(filebuffer->buffer());
+//file.close();
+return result;
 
     QStringList departResult;
     if (!query.evaluateTo(&departResult))
@@ -199,15 +227,11 @@ ResultInfo parser131500ComAu::getJourneyData(QString destinationStation, QString
         qDebug() << "parser131500ComAu::getJourneyData - Query 1 Failed";
     }
 
-    query.setQuery("declare default element namespace \"http://www.w3.org/1999/xhtml\"; declare variable $path external; doc($path)/html/body/div/div/table/tbody/tr/td[@id='header3']/string()");
-
     QStringList arriveResult;
     if (!query.evaluateTo(&arriveResult))
     {
         qDebug() << "parser131500ComAu::getJourneyData - Query 2 Failed";
     }
-
-    query.setQuery("declare default element namespace \"http://www.w3.org/1999/xhtml\"; declare variable $path external; doc($path)/html/body/div/div/table/tbody/tr/td[@id='header4']/string()");
 
     QStringList timeResult;
     if (!query.evaluateTo(&timeResult))
@@ -215,15 +239,11 @@ ResultInfo parser131500ComAu::getJourneyData(QString destinationStation, QString
         qDebug() << "parser131500ComAu::getJourneyData - Query 3 Failed";
     }
 
-    query.setQuery("declare default element namespace \"http://www.w3.org/1999/xhtml\"; declare variable $path external; doc($path)/html/body/div/div/table/tbody/tr/td[@id='header5']/string()");
-
     QStringList trainResult;
     if (!query.evaluateTo(&trainResult))
     {
         qDebug() << "parser131500ComAu::getJourneyData - Query 4 Failed";
     }
-
-    query.setQuery("declare default element namespace \"http://www.w3.org/1999/xhtml\"; declare variable $path external; doc($path)/html/body/div/div/div/string()");
 
     QStringList headerResult;
     if (!query.evaluateTo(&headerResult))
@@ -231,97 +251,6 @@ ResultInfo parser131500ComAu::getJourneyData(QString destinationStation, QString
         qDebug() << "parser131500ComAu::getJourneyData - Query 5 Failed";
     }
 
-    ResultInfo result;
-
-    for (int i = 0; i < headerResult.count(); i++) {
-        QRegExp regexp = QRegExp("(From:|To:|When:)(.*)$");
-        regexp.setMinimal(true);
-        regexp.indexIn(headerResult[i].trimmed());
-        if (regexp.cap(1) == "From:") {
-            result.fromStation = regexp.cap(2).trimmed();
-        }
-        if (regexp.cap(1) == "To:") {
-            result.toStation = regexp.cap(2).trimmed();
-        }
-        if (regexp.cap(1) == "When:") {
-            result.timeInfo = regexp.cap(2).trimmed();
-        }
-    }
-
-    //Generate Details search results
-
-    QStringList detailsResult;
-
-    regexp = QRegExp("<table class=\"dataTbl widthcol2and3\" cellspacing=\"0\" style=\"margin:0px ! important;border-right:0px none;\" summary=\"Search Results Details\">(.*)</table>");
-    regexp.setMinimal(true);
-    int pos = 0;
-
-    while ((pos = regexp.indexIn(filebuffer->buffer(), pos)) != -1) {
-        QString element = "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><html xmlns=\"http://www.w3.org/1999/xhtml\">\n<body><table>\n" + regexp.cap(1) + "\n</table></body>\n</html>\n";
-        element.replace("&nbsp;", " ");
-        element.replace("bulletin.gif\">", "bulletin.gif\" />");
-
-        QBuffer readBuffer;
-        readBuffer.setData(element.toAscii());
-        readBuffer.open(QIODevice::ReadOnly);
-
-        QXmlQuery query;
-        query.bindVariable("path", &readBuffer);
-
-        query.setQuery("declare default element namespace \"http://www.w3.org/1999/xhtml\"; declare variable $path external; doc($path)/html/body/table/tbody/tr/td[@headers='header2']/string()");
-
-        QStringList detailsContentResult;
-        if (!query.evaluateTo(&detailsContentResult))
-        {
-            qDebug() << "parser131500ComAu::getJourneyData - DetailsQuery 1 Failed";
-        }
-
-        detailsResult << detailsContentResult.join("<linesep>");
-
-        pos += regexp.matchedLength();
-    }
-
-    //Create search result
-    for (int i = 0; i < departResult.count(); i++) {
-
-        //Parse transporttypes and changes
-        QString tmp = trainResult[i].trimmed();
-        tmp.replace("\t", " ");
-        tmp.replace("\n", " ");
-        tmp.replace("\r", " ");
-        QStringList trains = tmp.split(" ", QString::SkipEmptyParts);
-        int changes = trains.length() - 1;
-        trains.removeDuplicates();
-
-        //Parse travel time
-        tmp = timeResult[i].trimmed();
-        tmp.replace("mins", "");
-        tmp.replace("min", "");
-        tmp.replace("hrs ", ":");
-        tmp.replace("hr ", ":");
-        QStringList durationLst = tmp.split(":", QString::SkipEmptyParts);
-        QString durationStr = "";
-        if (durationLst.length() == 1) {
-            durationStr = "00:" + fahrplanUtils::leadingZeros(durationLst[0].toInt(), 2);
-        }
-        if (durationLst.length() == 2) {
-            durationStr = fahrplanUtils::leadingZeros(durationLst[0].toInt(), 2) + ":" + fahrplanUtils::leadingZeros(durationLst[1].toInt(), 2);
-        }
-
-        QString detailsData = detailsResult[i];
-        detailsData.prepend("Header: <duration>" + durationStr + "</duration><date>" + result.timeInfo + "</date><linesep>");
-
-        ResultItem item;
-        item.changes    = QString::number(changes);
-        item.duration   = durationStr;
-        item.trainType  = trains.join(", ");
-        item.fromTime   = QTime::fromString(departResult[i].trimmed(), "h:map").toString("hh:mm");
-        item.toTime     = QTime::fromString(arriveResult[i].trimmed(), "h:map").toString("hh:mm");
-        item.detailsUrl = detailsData;
-        result.items.append(item);
-    }
-
-    filebuffer->close();
     delete filebuffer;
     return result;
 }
