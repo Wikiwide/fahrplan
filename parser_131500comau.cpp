@@ -303,14 +303,15 @@ DetailResultInfo parser131500ComAu::getJourneyDetailsData(QString queryUrl)//Whi
         }else{
             route = "";
         }
+        route=modes[tor];
         dur=dur+leg["duration"].toInt();
         item.train = route;
-        item.fromStation = leg["origin"].toString();
+        item.fromStation = leg["origin"].toString();//???
         item.toStation = leg["destination"].toString();
-        item.fromInfo = leg["start"].toString();
-        item.toInfo = leg["end"].toString();
+        item.fromInfo = leg["origin"].toString();//???
+        item.toInfo = leg["destination"].toString();
         QString duration = "Duration: ";
-        duration.append(leg["duration"].toString());
+        duration.append(leg["duration"].toString());//seconds!!!
         item.info = duration;
         result.items.append(item);
     }
