@@ -31,7 +31,7 @@ parser131500ComAu::parser131500ComAu(QObject *parent)
 
 bool parser131500ComAu::supportsGps()
 {
-    return false;
+    return true;
 }
 
 QStringList parser131500ComAu::getStationsByName(QString stationName)
@@ -104,9 +104,42 @@ QStringList parser131500ComAu::getTrainRestrictions()
 
 QStringList parser131500ComAu::getStationsByGPS(qreal latitude, qreal longitude)
 {
-    Q_UNUSED(latitude);
-    Q_UNUSED(longitude);
+    qDebug() << "131500: getStationsByGPS";
+    QString fullUrl = "https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=coord&coordOutputFormat=EPSG%3A4326&TfNSWSF=true&version=10.2.1.42";
+    fullUrl.append("&name_sf=" + longitude.toString() + "%3A" + latitude.toString() + "%3AEPSG%3A4326");
+    qDebug() << fullUrl;
+
+    QUrl url(fullUrl);
+
+    http->setHost(url.host(), QHttp::ConnectionModeHttps, url.port() == -1 ? 0 : url.port());//sslErrors???
+
+    filebuffer = new QBuffer();
+
+    if (!filebuffer->open(QIODevice::WriteOnly))
+    {
+        qDebug() << "Can't open Buffer";
+    }
+    QHttpRequestHeader header;
+    header.setRequest("GET", url.path());
+    header.setValue("Host", url.host());
+    header.setValue("Accept", "application/json");
+    header.setValue("Authorization", "apikey NT3I18YtJOmS2xWEtAagMszSiXysEQeC84fY");//Wikiwide's API key
+    currentRequestId = http->request(header, "", filebuffer);
+    loop.exec();
+    filebuffer->close();
+    QJson::Parser parser;
+    bool ok;
     QStringList result;
+    QVariantMap map = parser.parse(filebuffer->buffer(),&ok).toMap();
+    qDebug() << "Parsed JSON to Map: " << ok;
+    QVariantList locations = map["locations"].toList();
+    foreach (QVariant l, locations)
+     {
+      QVariantMap location = l.toMap();
+      QString item = location["id"].toString();
+      bool ok;
+      result.append(item);
+     }
     return result;
 }
 
