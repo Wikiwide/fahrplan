@@ -36,15 +36,14 @@ bool parser131500ComAu::supportsGps()
 
 QStringList parser131500ComAu::getStationsByName(QString stationName)
 {
-    QString fullUrl = "http://www.131500.com.au/plan-your-trip/trip-planner?session=invalidate&itd_cmd=invalid&itd_includedMeans=checkbox&itd_inclMOT_5=1&itd_inclMOT_7=1&itd_inclMOT_1=1&itd_inclMOT_9=1&itd_anyObjFilter_origin=2&itd_anyObjFilter_destination=0&itd_name_destination=Enter+location&x=37&y=12&itd_itdTripDateTimeDepArr=dep&itd_itdTimeHour=-&itd_itdTimeMinute=-&itd_itdTimeAMPM=pm";
-    fullUrl.append("&itd_itdDate=" + QDate::currentDate().toString("yyyyMMdd"));
-    fullUrl.append("&itd_name_origin=" + stationName);
-
-    qDebug() << "parser131500ComAu::getStationsByName";
+    qDebug() << "131500: getStationsByName";
+    QString fullUrl = "https://api.transport.nsw.gov.au/v1/tp/stop_finder?outputFormat=rapidJSON&type_sf=stop&coordOutputFormat=EPSG%3A4326&TfNSWSF=true&version=10.2.1.42";
+    fullUrl.append("&name_sf=" + stationName);
+    qDebug() << fullUrl;
 
     QUrl url(fullUrl);
 
-    http->setHost(url.host(), QHttp::ConnectionModeHttp, url.port() == -1 ? 0 : url.port());
+    http->setHost(url.host(), QHttp::ConnectionModeHttps, url.port() == -1 ? 0 : url.port());//sslErrors???
 
     filebuffer = new QBuffer();
 
@@ -52,42 +51,28 @@ QStringList parser131500ComAu::getStationsByName(QString stationName)
     {
         qDebug() << "Can't open Buffer";
     }
-
-    currentRequestId = http->get(url.path() + "?" + url.encodedQuery(), filebuffer);
-
+    QHttpRequestHeader header;
+    header.setRequest("GET", url.path());
+    header.setValue("Host", url.host());
+    header.setValue("Accept", "application/json");
+    header.setValue("Authorization", "apikey NT3I18YtJOmS2xWEtAagMszSiXysEQeC84fY");//Wikiwide's API key
+    currentRequestId = http->request(header, "", filebuffer);
     loop.exec();
-
     filebuffer->close();
-
-    QRegExp regexp = QRegExp("<select name=\"(.*)\" id=\"from\" size=\"6\" class=\"multiple\">(.*)</select>");
-    regexp.setMinimal(true);
-
-    regexp.indexIn(filebuffer->buffer());
-
-    QString element = "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><html xmlns=\"http://www.w3.org/1999/xhtml\">\n<body>\n" + regexp.cap(0) + "\n</body>\n</html>\n";
-
-    QBuffer readBuffer;
-    readBuffer.setData(element.toAscii());
-    readBuffer.open(QIODevice::ReadOnly);
-
-    QXmlQuery query;
-    query.bindVariable("path", &readBuffer);
-    //Query for more than one result
-    query.setQuery("declare default element namespace \"http://www.w3.org/1999/xhtml\"; declare variable $path external; doc($path)/html/body/select/option/string()");
-
+    QJson::Parser parser;
+    bool ok;
     QStringList result;
-    if (!query.evaluateTo(&result))
-    {
-        qDebug() << "parser131500ComAu::getStationsByName - Query 1 Failed";
-    }
-
-    //Remove unneeded stuff from the result
-    for (int i = 0; i < result.count(); i++) {
-        result[i].replace(" (Location)", "");
-    }
-
+    QVariantMap map = parser.parse(filebuffer->buffer(),&ok).toMap();
+    qDebug() << "Parsed JSON to Map: " << ok;
+    QVariantList locations = map["locations"].toList();
+    foreach (QVariant l, locations)
+     {
+      QVariantMap location = l.toMap();
+      QString item = location["name"].toString() + "@" + location["id"].toString();
+      bool ok;
+      result.append(item);
+     }
     delete filebuffer;
-
     return result;
 }
 
@@ -136,10 +121,11 @@ QStringList parser131500ComAu::getStationsByGPS(qreal latitude, qreal longitude)
     foreach (QVariant l, locations)
      {
       QVariantMap location = l.toMap();
-      QString item = location["id"].toString();
+      QString item = location["name"].toString() + "@" + location["id"].toString();
       bool ok;
       result.append(item);
      }
+    delete filebuffer;
     return result;
 }
 
