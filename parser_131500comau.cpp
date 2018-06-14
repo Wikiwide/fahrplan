@@ -234,23 +234,23 @@ ResultInfo parser131500ComAu::getJourneyData(QString destinationStation, QString
 //    result.timeInfo = sdate.section(' ',0,0);//???
     QVariantList journeys = map["journeys"].toList();
     foreach (QVariant j, journeys)
-     {
-      QVariantMap journey = j.toMap();
-      ResultItem item;
-      QStringList trains;
-      QVariantList legs = journey["legs"].toList();
-      int dur=0;
-      foreach (QVariant l, legs)
-       {
-        QVariantMap leg = l.toMap();
-        QVariantMap trans = leg["transportation"].toMap();
-        dur=dur+leg["duration"].toInt();
-        QVariantMap pro = trans["product"].toMap();
-        QVariantMap tor = pro["class"].toInt();
-        if (tor != 100 && tor != 99)
-         {
-          trains.append(modes[tor]);//use tor and QMap!!!
-         }
+    {
+        QVariantMap journey = j.toMap();
+        ResultItem item;
+        QStringList trains;
+        QVariantList legs = journey["legs"].toList();
+        int dur=0;
+        foreach (QVariant l, legs)
+        {
+            QVariantMap leg = l.toMap();
+            QVariantMap trans = leg["transportation"].toMap();
+            dur=dur+leg["duration"].toInt();
+            QVariantMap pro = trans["product"].toMap();
+            QVariantMap tor = pro["class"].toInt();
+            if (tor != 100 && tor != 99)
+            {
+                trains.append(modes[tor]);//use tor and QMap!!!
+            }
         }
         trains.removeDuplicates();
         item.trainType = trains.join(", ");
@@ -260,9 +260,9 @@ ResultInfo parser131500ComAu::getJourneyData(QString destinationStation, QString
         QJson::Serializer serializer;
         QByteArray jsonleg = serializer.serialize(journey, &ok);
         qDebug() << "Serialized a journey: " << ok;
-item.detailsUrl = jsonleg;
-result.items.append(item);
-}
+        item.detailsUrl = jsonleg;
+        result.items.append(item);
+    }
 //QFile file("/home/user/post.txt");
 //file.open(QIODevice::WriteOnly);
 //file.write(filebuffer->buffer());
@@ -282,102 +282,44 @@ ResultInfo parser131500ComAu::getJourneyData(QString queryUrl)//Which url???
 //data directly because the data is already present after visiting the search results.
 DetailResultInfo parser131500ComAu::getJourneyDetailsData(QString queryUrl)//Which url??? !!!
 {
-    QStringList detailResults = queryUrl.split("<linesep>");
+    QJson::Parser parser;
 
+    bool ok;
     DetailResultInfo result;
-
-    QDate journeydate;
-
-    for (int i = 0; i < detailResults.count(); i++) {
+    QVariantMap journey = parser.parse(queryUrl.toAscii(),&ok).toMap();
+    int dur=0;
+    QVariantList legs = journey["legs"].toList();
+    foreach (QVariant l, legs)
+    {
         DetailResultItem item;
-        QRegExp regexp = QRegExp("(Take the |Walk to |Header: )(.*)$");
-        regexp.setMinimal(true);
-        regexp.indexIn(detailResults[i].trimmed());
-
-        if (regexp.cap(1) == "Header: ") {
-            //qDebug()<<"HEADER: "<<regexp.cap(2).trimmed();
-            QRegExp regexp2 = QRegExp("<duration>(.*)</duration><date>(.*), (\\d\\d) (.*) (\\d\\d\\d\\d)</date>");
-            regexp2.setMinimal(true);
-            regexp2.indexIn(regexp.cap(2).trimmed());
-            result.duration = regexp2.cap(1).trimmed();
-            QLocale enLocale = QLocale(QLocale::English, QLocale::UnitedStates);
-            int month = 1;
-            for (month = 1; month < 10; month++) {
-                if (regexp2.cap(4).trimmed() == enLocale.standaloneMonthName(month)) {
-                    break;
-                }
-            }
-            journeydate = QDate::fromString(regexp2.cap(3).trimmed() + " " + QString::number(month) + " " + regexp2.cap(5).trimmed(), "dd M yyyy");
+        QVariantMap leg = l.toMap();
+        QString route = "";
+        QVariantMap trans = leg["transportation"].toMap();
+        QVariantMap pro = trans["product"].toMap();
+        QVariantMap tor = pro["class"].toInt();
+        if (tor == 100 or tor == 99)
+        {
+            route = "Walk ";
+        }else{
+            route = "";
         }
-        if (regexp.cap(1) == "Take the ") {
-            //qDebug()<<"Regular: "<<regexp.cap(2).trimmed();
-            QRegExp regexp2 = QRegExp("(.*)Dep: (\\d:\\d\\d|\\d\\d:\\d\\d)(am|pm) (.*)Arr: (\\d:\\d\\d|\\d\\d:\\d\\d)(am|pm) (.*)(\\t+.*)$");
-            regexp2.setMinimal(true);
-            regexp2.indexIn(regexp.cap(2).trimmed());
-            //qDebug()<<"***";
-            if (regexp2.matchedLength() == -1) {
-                regexp2 = QRegExp("(.*)Dep: (\\d:\\d\\d|\\d\\d:\\d\\d)(am|pm) (.*)Arr: (\\d:\\d\\d|\\d\\d:\\d\\d)(am|pm) (.*)$");
-                regexp2.setMinimal(true);
-                regexp2.indexIn(regexp.cap(2).trimmed());
-            }
-            /*
-            qDebug()<<"Train:"<<regexp2.cap(1).trimmed();
-            qDebug()<<"Time1:"<<regexp2.cap(2).trimmed();
-            qDebug()<<"Time1b:"<<regexp2.cap(3).trimmed();
-            qDebug()<<"Station1:"<<regexp2.cap(4).trimmed();
-            qDebug()<<"Time2:"<<regexp2.cap(5).trimmed();
-            qDebug()<<"Time2b:"<<regexp2.cap(6).trimmed();
-            qDebug()<<"Station2:"<<regexp2.cap(7).trimmed();
-            qDebug()<<"Alt:"<<regexp2.cap(8).trimmed();
-            */
-            item.fromStation = regexp2.cap(4).trimmed();
-            item.toStation   = regexp2.cap(7).trimmed();
-            item.info        = regexp2.cap(8).trimmed();
-            item.train       = regexp2.cap(1).trimmed();
-            QTime fromTime   = QTime::fromString(regexp2.cap(2).trimmed() + regexp2.cap(3).trimmed(), "h:map");
-            QTime toTime     = QTime::fromString(regexp2.cap(5).trimmed() + regexp2.cap(6).trimmed(), "h:map");
-
-            item.fromTime.setDate(journeydate);
-            item.fromTime.setTime(fromTime);
-            item.toTime.setDate(journeydate);
-            item.toTime.setTime(toTime);
-
-            if (item.toTime.toTime_t() < item.fromTime.toTime_t()) {
-                item.toTime.addDays(1);
-                journeydate.addDays(1);
-            }
-
-            item.fromInfo = item.fromTime.time().toString("hh:mm");
-            item.toInfo = item.toTime.time().toString("hh:mm");
-
-            result.items.append(item);
-        }
-        if (regexp.cap(1) == "Walk to ") {
-            //qDebug()<<"Walking: "<<regexp.cap(2).trimmed();
-            QRegExp regexp2 = QRegExp("(.*) - (.+) (.*)$");
-            regexp2.setMinimal(true);
-            regexp2.indexIn(regexp.cap(2).trimmed());
-            /*
-            qDebug()<<"***";
-            qDebug()<<"Station1:"<<regexp2.cap(1).trimmed();
-            qDebug()<<"WalkDist1:"<<regexp2.cap(2).trimmed();
-            qDebug()<<"WalkDist2:"<<regexp2.cap(3).trimmed();
-            */
-            item.fromStation = "";
-            if (result.items.count() > 0) {
-                item.fromStation = result.items.last().toStation;
-                item.fromInfo    = result.items.last().toInfo;
-                item.fromTime    = result.items.last().toTime;
-                item.toTime      = result.items.last().toTime;
-            }
-            item.toStation   = regexp2.cap(1).trimmed();
-            item.info        = "Walking " + regexp2.cap(2).trimmed() + " " + regexp2.cap(3).trimmed();
-
-            //Don't add WalkTo infos as first item
-            if (result.items.count() > 0) {
-                result.items.append(item);
-            }
-        }
+        dur=dur+leg["duration"].toInt();
+        item.train = route;
+        item.fromStation = leg["origin"].toString();
+        item.toStation = leg["destination"].toString();
+        item.fromInfo = leg["start"].toString();
+        item.toInfo = leg["end"].toString();
+        QString duration = "Duration: ";
+        duration.append(leg["duration"].toString());
+        item.info = duration;
+        result.items.append(item);
     }
+    result.duration = dur.toString();
+
+//QFile file("/home/user/post.txt");
+//file.open(QIODevice::WriteOnly);
+//file.write(filebuffer->buffer());
+//file.close();
+    delete filebuffer;
     return result;
 }
