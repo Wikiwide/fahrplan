@@ -20,13 +20,29 @@
 
 #include "parser_131500comau.h"
 
+void parserTranslink::tsslErrors(const QList<QSslError> & errors)
+{
+    qDebug() << "SSL errors found";
+    foreach( const QSslError &error, errors )
+    {
+        qDebug() << "SSL Error: " << error.errorString();
+    }
+}
+
 parser131500ComAu::parser131500ComAu(QObject *parent)
 {
      Q_UNUSED(parent);
      http = new QHttp(this);
 
+     QSslSocket* sslSocket = new QSslSocket(this);
+     sslSocket->setProtocol(QSsl::SecureProtocols);
+     sslSocket->setPeerVerifyName("api.transport.nsw.gov.au");
+     http->setSocket(sslSocket);
+
      connect(http, SIGNAL(requestFinished(int,bool)),
              this, SLOT(httpRequestFinished(int,bool)));
+     connect(http, SIGNAL(sslErrors(const QList<QSslError> &)),
+             this, SLOT(tsslErrors(const QList<QSslError> &)));
 }
 
 bool parser131500ComAu::supportsGps()
@@ -158,8 +174,8 @@ ResultInfo parser131500ComAu::getJourneyData(QString destinationStation, QString
     fullUrl.append("&itdDate=" + date.toString("yyyyMMdd"));
     fullUrl.append("&itdTime=" + time.toString("hhmm"));
     fullUrl.append("&depArrMacro=" + modeString);
-    fullUrl.append("&name_origin=" + destinationStation);//10101331
-    fullUrl.append("&name_destination=" + arrivalStation);//10102027
+    fullUrl.append("&name_origin=" + destinationStation.section('@',1,1));//10101331
+    fullUrl.append("&name_destination=" + arrivalStation.section('@',1,1));//10102027
     fullUrl.append("&excludedMeans=checkbox");
 
     // itd_inclMOT_5 = bus
