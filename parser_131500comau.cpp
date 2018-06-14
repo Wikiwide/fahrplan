@@ -113,6 +113,22 @@ QStringList parser131500ComAu::getStationsByGPS(qreal latitude, qreal longitude)
 ResultInfo parser131500ComAu::getJourneyData(QString destinationStation, QString arrivalStation, QString viaStation, QDate date, QTime time, int mode, int trainrestrictions)
 {
     Q_UNUSED(viaStation);
+    const QMap<int, QString> modes = {
+        { 1, "train" },
+        { 4, "light rail" },
+        { 5, "bus" },
+        { 7, "coach" },
+        { 9, "ferry" },
+        { 11, "school bus" },
+        { 99, "walking" },
+        { 100, "walking (footpath)" },
+        { 101, "bicycle" },
+        { 102, "take bicycle on public transport" },
+        { 103, "kiss&ride" },
+        { 104, "park&ride" },
+        { 105, "taxi" },
+        { 106, "car" },
+    };
     QString modeString = "dep";
     if (mode == 0) {
         modeString = "arr";
@@ -174,6 +190,7 @@ ResultInfo parser131500ComAu::getJourneyData(QString destinationStation, QString
     bool ok;
     ResultInfo result;
     QVariantMap map = parser.parse(filebuffer->buffer(),&ok).toMap();
+    qDebug() << "Parsed JSON to Map: " << ok;
 //    QVariantMap options = map["traveloptions"].toMap();//???
 //    QVariantMap enquiry = options["OriginalEnquiry"].toMap();//???
 //    result.fromStation = enquiry["Start"].toString();//???
@@ -187,31 +204,27 @@ ResultInfo parser131500ComAu::getJourneyData(QString destinationStation, QString
       ResultItem item;
       QStringList trains;
       QVariantList legs = journey["legs"].toList();
-      int changes = 0;
+      int dur=0;
       foreach (QVariant l, legs)
        {
         QVariantMap leg = l.toMap();
         QVariantMap trans = leg["transportation"].toMap();
+        dur=dur+leg["duration"].toInt();
         QVariantMap pro = trans["product"].toMap();
         QVariantMap tor = pro["class"].toInt();
         if (tor != 100 && tor != 99)
          {
-          trains.append(trans["description"].toString());//use tor and QMap!!!
-          changes++;
+          trains.append(modes[tor]);//use tor and QMap!!!
          }
         }
         trains.removeDuplicates();
         item.trainType = trains.join(", ");
-        int c = changes - 1;
-        if (c < 0)
-         {
-          c = 0;
-         }
-        item.changes = QString::number(c);
-        item.duration = journey["duration"].toString();
-        QJson::Serializer serializer;
+        item.changes = QString::number(journey["interchanges"].toInt());
+        item.duration = dur.toString();
         bool ok;
+        QJson::Serializer serializer;
         QByteArray jsonleg = serializer.serialize(journey, &ok);
+        qDebug() << "Serialized a journey: " << ok;
 item.detailsUrl = jsonleg;
 result.items.append(item);
 }
@@ -219,43 +232,11 @@ result.items.append(item);
 //file.open(QIODevice::WriteOnly);
 //file.write(filebuffer->buffer());
 //file.close();
-return result;
-
-    QStringList departResult;
-    if (!query.evaluateTo(&departResult))
-    {
-        qDebug() << "parser131500ComAu::getJourneyData - Query 1 Failed";
-    }
-
-    QStringList arriveResult;
-    if (!query.evaluateTo(&arriveResult))
-    {
-        qDebug() << "parser131500ComAu::getJourneyData - Query 2 Failed";
-    }
-
-    QStringList timeResult;
-    if (!query.evaluateTo(&timeResult))
-    {
-        qDebug() << "parser131500ComAu::getJourneyData - Query 3 Failed";
-    }
-
-    QStringList trainResult;
-    if (!query.evaluateTo(&trainResult))
-    {
-        qDebug() << "parser131500ComAu::getJourneyData - Query 4 Failed";
-    }
-
-    QStringList headerResult;
-    if (!query.evaluateTo(&headerResult))
-    {
-        qDebug() << "parser131500ComAu::getJourneyData - Query 5 Failed";
-    }
-
     delete filebuffer;
     return result;
 }
 
-ResultInfo parser131500ComAu::getJourneyData(QString queryUrl)
+ResultInfo parser131500ComAu::getJourneyData(QString queryUrl)//Which url???
 {
     Q_UNUSED(queryUrl);
     ResultInfo result;
@@ -264,7 +245,7 @@ ResultInfo parser131500ComAu::getJourneyData(QString queryUrl)
 
 //We using a fake url, in fact we don't use an url at all, we use the details
 //data directly because the data is already present after visiting the search results.
-DetailResultInfo parser131500ComAu::getJourneyDetailsData(QString queryUrl)
+DetailResultInfo parser131500ComAu::getJourneyDetailsData(QString queryUrl)//Which url??? !!!
 {
     QStringList detailResults = queryUrl.split("<linesep>");
 
